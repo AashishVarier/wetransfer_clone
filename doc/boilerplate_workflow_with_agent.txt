@@ -1,0 +1,121 @@
+Create a boilerplate project template for a small "WeTransfer-like" file sharing application.
+
+IMPORTANT:
+- Generate only boilerplate (folder structure + minimal working stubs).
+- Do NOT implement full business logic.
+- Keep code minimal but runnable.
+- Add TODO comments where real logic should go.
+- Include tests for frontend and backend.
+
+Tech Stack:
+
+Frontend:
+- React (Vite)
+- Tailwind CSS
+- Deployed as static site to AWS S3
+- Jest + React Testing Library for tests
+
+Backend:
+- Python 3.11
+- AWS Lambda
+- Serverless Framework
+- API Gateway
+- boto3
+- unittest for tests
+
+Project Requirements (for context only, DO NOT fully implement):
+- File upload/download limited to 2MB
+- User authentication placeholder
+- Rate limiting placeholder
+- Auto delete after 2 minutes placeholder
+- User data segregation placeholder
+- Shareable links placeholder
+
+Repository Structure:
+
+/
+├── README.md
+├── .gitignore
+├── frontend/
+│   ├── package.json
+│   ├── vite.config.js
+│   ├── tailwind.config.js
+│   ├── postcss.config.js
+│   ├── index.html
+│   ├── src/
+│   │   ├── main.jsx
+│   │   ├── App.jsx
+│   │   ├── components/
+│   │   │   ├── UploadForm.jsx
+│   │   │   └── FileList.jsx
+│   │   └── services/
+│   │       └── api.js
+│   └── tests/
+│       └── App.test.jsx
+│
+├── backend/
+│   ├── serverless.yml
+│   ├── requirements.txt
+│   ├── handler.py
+│   ├── services/
+│   │   ├── s3_service.py
+│   │   └── metadata_service.py
+│   └── tests/
+│       └── test_handler.py
+│
+└── .github/
+    └── workflows/
+        └── ci.yml
+
+Requirements for Boilerplate:
+
+FRONTEND:
+- Minimal React app using Vite.
+- Tailwind configured.
+- UploadForm component with file input and button (no real upload logic, just console.log).
+- FileList component showing mock static data.
+- api.js with placeholder functions (uploadFile, listFiles).
+- One simple test for App component rendering.
+- README section explaining how to:
+  - npm install
+  - npm run dev
+  - npm run build
+  - deploy build folder to S3
+
+BACKEND:
+- serverless.yml defining:
+  - One Lambda function (api)
+  - HTTP API Gateway trigger
+  - Python 3.11 runtime
+- handler.py with:
+  - lambda_handler(event, context)
+  - basic JSON response
+  - placeholder routes ("/upload", "/files")
+- requirements.txt including boto3 and unittest
+- s3_service.py and metadata_service.py with empty stub functions and TODO comments
+- One simple unittest test for lambda_handler
+- README section explaining:
+  - pip install -r requirements.txt
+  - serverless deploy
+  - serverless offline (if plugin added as comment)
+
+CI:
+- GitHub Actions workflow that:
+  - Runs frontend install + test
+  - Runs backend install + unittest
+
+General Rules:
+- Add clear TODO comments for:
+  - 2MB validation
+  - S3 upload
+  - DynamoDB integration
+  - Authentication
+  - Rate limiting
+  - Auto deletion
+- Keep everything minimal.
+- No production implementation.
+- Focus only on scaffolding and structure.
+
+Output:
+Generate all files with minimal working content.
+Keep implementation short and clean.

@@ -1,276 +1,52 @@
-# TODO: Add deployment configuration for production
-# - Use AWS Secrets Manager for sensitive data
-# - Configure CloudFront CDN for S3
-# - Set up CloudWatch monitoring and alarms
-# - Configure X-Ray tracing for debugging
-# - Use reserved capacity for cost optimization
-
-service: aws-free-tier-wetransfer-clone
-
-frameworkVersion: '3'
+service: wetransfer-clone
 
 provider:
   name: aws
-  runtime: python3.9
-  region: ${env:AWS_REGION} #don't keep default region, must be set in env
-  stage: ${env:STAGE} #don't keep default stage, must be set in env
-  memorySize: 512
-  timeout: 30
-  
-  # TODO: recheck configuration of IAM role with least privilege permissions
-  iamRoleStatements:
-    - Effect: Allow
-      Action:
-        - s3:GetObject
-        - s3:PutObject
-        - s3:DeleteObject
-      Resource: 'arn:aws:s3:::${self:custom.s3Bucket}/*'
-    
-    - Effect: Allow
-      Action:
-        - dynamodb:GetItem
-        - dynamodb:PutItem
-        - dynamodb:UpdateItem
-        - dynamodb:Query
-        - dynamodb:DeleteItem
-      Resource: 'arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/${self:custom.dynamodbTable}'
-    
-    - Effect: Allow
-      Action:
-        - sqs:SendMessage
-        - sqs:ReceiveMessage
-        - sqs:DeleteMessage
-        - sqs:GetQueueAttributes
-      Resource: 'arn:aws:sqs:${aws:region}:${aws:accountId}:${self:custom.sqsQueueName}'
-    
-    - Effect: Allow
-      Action:
-        - logs:CreateLogGroup
-        - logs:CreateLogStream
-        - logs:PutLogEvents
-      Resource: 'arn:aws:logs:${aws:region}:${aws:accountId}:*'
-
-  # Environment variables passed to all Lambda functions
+  runtime: python3.11
+  region: us-east-1
+  stage: ${opt:stage, 'dev'}
   environment:
-    S3_BUCKET: ${self:custom.s3Bucket}
-    DYNAMODB_TABLE: ${self:custom.dynamodbTable}
-    SQS_QUEUE_NAME: ${self:custom.sqsQueueName}
-    MAX_FILE_SIZE: ${env:MAX_FILE_SIZE, '2097152'}
-    DELETION_DELAY_SECONDS: ${env:DELETION_DELAY_SECONDS, '120'}
-    UPLOAD_PRESIGNED_URL_EXPIRY: ${env:UPLOAD_PRESIGNED_URL_EXPIRY, '3600'}
-    DOWNLOAD_PRESIGNED_URL_EXPIRY: ${env:DOWNLOAD_PRESIGNED_URL_EXPIRY, '86400'}
-    RATE_LIMIT_UPLOADS_PER_MINUTE: ${env:RATE_LIMIT_UPLOADS_PER_MINUTE, '10'}
-    RATE_LIMIT_DOWNLOADS_PER_MINUTE: ${env:RATE_LIMIT_DOWNLOADS_PER_MINUTE, '20'}
-    ITEM_TTL_SECONDS: ${env:ITEM_TTL_SECONDS, '300'}
-
-custom:
-  s3Bucket: aws-free-tier-wetransfer-clone-files-${aws:accountId}-${aws:region}
-  dynamodbTable: aws-free-tier-wetransfer-metadata
-  sqsQueueName: aws-free-tier-wetransfer-delete-queue
+    S3_BUCKET_NAME: ${self:service}-files-${self:provider.stage}
+    DYNAMODB_TABLE_NAME: ${self:service}-metadata-${self:provider.stage}
+    FILE_EXPIRATION_MINUTES: 2
 
 functions:
-  # Lambda: Upload Handler
-  # POST /files/upload - Returns presigned S3 PUT URL
-  uploadFiles:
-    handler: handler/uploadFiles.handler
+  api:
+    handler: handler.lambda_handler
     events:
       - http:
-          path: files/upload
-          method: post
-          cors:
-            origin: '*'
-            headers:
-              - Content-Type
-              - Authorization
-            allowCredentials: true
+          path: /{proxy+}
+          method: ANY
+          cors: true
+    timeout: 30
     memorySize: 256
-    timeout: 30
 
-  # Lambda: List Files Handler
-  # GET /files - Returns user file data from DynamoDB
-  listFiles:
-    handler: handler/listFiles.handler
-    events:
-      - http:
-          path: files
-          method: get
-          cors:
-            origin: '*'
-            headers:
-              - Content-Type
-              - Authorization
-            allowCredentials: true
-    memorySize: 128
-    timeout: 10
+# TODO: Uncomment to use serverless-offline for local development
+# plugins:
+#   - serverless-offline
+#   - serverless-python-requirements
 
-  # Lambda: Get Download URL Handler
-  # GET /files/{fileId}/download - Returns presigned S3 GET URL
-  getDownload:
-    handler: handler/getDownload.handler
-    events:
-      - http:
-          path: files/{fileId}/download
-          method: get
-          cors:
-            origin: '*'
-            headers:
-              - Content-Type
-              - Authorization
-            allowCredentials: true
-    memorySize: 128
-    timeout: 10
+# TODO: Add DynamoDB resource
+# resources:
+#   Resources:
+#     MetadataTable:
+#       Type: AWS::DynamoDB::Table
+#       Properties:
+#         TableName: ${self:provider.environment.DYNAMODB_TABLE_NAME}
+#         BillingMode: PAY_PER_REQUEST
+#         AttributeDefinitions:
+#           - AttributeName: userId
+#             AttributeType: S
+#           - AttributeName: fileId
+#             AttributeType: S
+#         KeySchema:
+#           - AttributeName: userId
+#             KeyType: HASH
+#           - AttributeName: fileId
+#             KeyType: RANGE
+#         TimeToLiveSpecification:
+#           AttributeName: ttl
+#           Enabled: true
 
-  # Lambda: Delete File Handler (manual)
-  # DELETE /files/delete - Deletes all file immediately
-  deleteFiles:
-    handler: handler/deleteFiles.handler
-    events:
-      - http:
-          path: files/delete
-          method: delete
-          cors:
-            origin: '*'
-            headers:
-              - Content-Type
-              - Authorization
-            allowCredentials: true
-    memorySize: 128
-    timeout: 30
-
-  # Lambda: Delete File Handler (SQS-triggered, async)
-  # Triggered by SQS message after delay
-  deleteFileAsync:
-    handler: handler/deleteFileAsync.handler
-    events:
-      - sqs:
-          arn: !GetAtt DeletionQueue.Arn
-          batchSize: 10
-          batchWindow: 5
-    memorySize: 128
-    timeout: 30
-
-  # Lambda: Rate Limit Check Handler
-  # GET /ratelimit - Returns current rate limit status
-  checkRateLimit:
-    handler: handler/checkRateLimit.handler
-    events:
-      - http:
-          path: ratelimit
-          method: get
-          cors:
-            origin: '*'
-            headers:
-              - Content-Type
-              - Authorization
-            allowCredentials: true
-    memorySize: 128
-    timeout: 10
-
-# CloudFormation Resources
-resources:
-  Resources:
-    # S3 Bucket for File Storage
-    FileStorageBucket:
-      Type: AWS::S3::Bucket
-      Properties:
-        BucketName: ${self:custom.s3Bucket}
-        # TODO: Enable encryption for production
-        VersioningConfiguration:
-          Status: Suspended
-        # Auto-delete objects after 1 days (backup if deletion Lambda fails)
-        LifecycleConfiguration:
-          LifecycleRules:
-            - Id: DeleteOldFiles
-              Status: Enabled
-              ExpirationInDays: 1
-              NoncurrentVersionExpirationInDays: 1
-        # TODO: Configure bucket policy to restrict access
-        # For now, using presigned URLs for security
-        PublicAccessBlockConfiguration:
-          BlockPublicAcls: true
-          BlockPublicPolicy: true
-          IgnorePublicAcls: true
-          RestrictPublicBuckets: true
-
-    # DynamoDB Table for File Metadata
-    #TODO: recheck TTL and billing mode
-    MetadataTable:
-      Type: AWS::DynamoDB::Table
-      Properties:
-        TableName: ${self:custom.dynamodbTable}
-        BillingMode: PAY_PER_REQUEST
-        AttributeDefinitions:
-          - AttributeName: userId
-            AttributeType: S
-          - AttributeName: fileId
-            AttributeType: S
-        KeySchema:
-          - AttributeName: userId
-            KeyType: HASH
-          - AttributeName: fileId
-            KeyType: RANGE
-        # TODO: Configure TTL for automatic cleanup
-        TimeToLiveSpecification:
-          Enabled: true
-          AttributeName: ttl
-        Tags:
-          - Key: Application
-            Value: AWSFreeTierWeTransferClone
-
-    # SQS Queue for Delayed File Deletion
-    DeletionQueue:
-      Type: AWS::SQS::Queue
-      Properties:
-        QueueName: ${self:custom.sqsQueueName}
-        DelaySeconds: ${env:DELETION_DELAY_SECONDS, 120}
-        MessageRetentionPeriod: 900  # 15 minutes
-        VisibilityTimeout: 60
-        Tags:
-          - Key: Application
-            Value: AWSFreeTierWeTransferClone
-
-  Outputs:
-    S3BucketName:
-      Description: S3 bucket for file storage
-      Value: !Ref FileStorageBucket
-    DynamoDBTableName:
-      Description: DynamoDB table for metadata
-      Value: !Ref MetadataTable
-    SQSQueueUrl:
-      Description: SQS queue URL for deletion tasks
-      Value: !Ref DeletionQueue
-
-# Serverless Plugins
-plugins:
-  - serverless-offline
-  - serverless-dynamodb
-  - serverless-offline-sqs
-
-# Local development configuration
-custom:
-  serverless-offline:
-    httpPort: 3001
-    lambdaPort: 3002
-    websocketPort: 3003
-  
-  dynamodb:
-    stages:
-      - dev
-    start:
-      port: 8000
-      inMemory: true
-      migrate: true
-      seed: false
-    migration:
-      dir: migrations
-
-# Package configuration
-package:
-  individually: false
-  patterns:
-    - '!.git/**'
-    - '!.gitignore'
-    - '!.env'
-    - '!node_modules/aws-sdk/**'
-    - '!tests/**'
-
+# TODO: Add S3 bucket resource
+# TODO: Add Lambda execution role with S3 and DynamoDB permissions
