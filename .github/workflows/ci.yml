@@ -7,10 +7,15 @@ on:
     branches: [ main]
 
 jobs:
-  placeholder:
+  frontend:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "CI disabled - manual deployment"
+      - run: echo "Frontend CI disabled - manual deployment"
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Backend CI disabled - manual deployment"
 
   # TODO: Add integration tests
   # integration-tests:
