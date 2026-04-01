@@ -1,23 +1,66 @@
-# Dependencies
-node_modules/
-__pycache__/
-*.pyc
-*.pyo
-*.egg-info/
-dist/
-build/
+# Backend (Python)
+backend/venv/
+backend/__pycache__/
+backend/.pytest_cache/
+backend/.coverage
+backend/htmlcov/
+backend/*.pyc
+backend/*.pyo
+backend/*.egg-info/
+backend/dist/
+backend/build/
+backend/.serverless/
+backend/.env
+backend/.env.local
+backend/.env.*.local
+backend/.DS_Store
 
-# Environment
-.env
-.env.local
-.venv
-venv/
+# Frontend (Node)
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/.next/
+frontend/out/
+frontend/.nuxt/
+frontend/.cache/
+frontend/.vuepress/dist/
+frontend/.serverless_nextjs/
+frontend/.tern-port
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+frontend/coverage/
+frontend/.DS_Store
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
+.DS_Store
+.env.local
+.env.*.local
+*.log
+.
+# OS
+Thumbs.db
+.DS_Store
+
+# AWS
+.aws/
+sam-tests/
+
+# Root
+.git/
+.venv/
+dist/
+build/
+node_modules/
+__pycache__/
+*.pyc
+.env
+.env.*.local
 
 # Build outputs
 frontend/dist/

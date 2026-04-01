@@ -1,52 +1,275 @@
+# WeTransfer Clone - Serverless Framework Configuration
+# Defines Lambda functions, API Gateway routes, and AWS resources
+
 service: wetransfer-clone
+
+# TODO: Configure custom domain if needed
+# custom:
+#   customDomain:
+#     domainName: api.wetransfer-clone.com
+#     certificateName: '*.wetransfer-clone.com'
+#     basePath: ''
+#     stage: ${self:provider.stage}
+#     createRoute53Record: true
 
 provider:
   name: aws
   runtime: python3.11
-  region: us-east-1
+  region: ${opt:region, 'us-east-1'}
   stage: ${opt:stage, 'dev'}
+  
+  # Environment variables available to all Lambda functions
   environment:
     S3_BUCKET_NAME: ${self:service}-files-${self:provider.stage}
     DYNAMODB_TABLE_NAME: ${self:service}-metadata-${self:provider.stage}
+    DYNAMODB_RATELIMIT_TABLE: ${self:service}-ratelimit-${self:provider.stage}
     FILE_EXPIRATION_MINUTES: 2
+    JWT_SECRET: ${opt:jwtSecret, 'dev-secret-change-in-production'}
+    LOG_LEVEL: ${opt:logLevel, 'INFO'}
+  
+  # IAM role with least-privilege permissions
+  iamRoleStatements:
+    # S3 permissions
+    - Effect: Allow
+      Action:
+        - s3:GetObject
+        - s3:PutObject
+        - s3:DeleteObject
+      Resource: arn:aws:s3:::${self:provider.environment.S3_BUCKET_NAME}/*
+    
+    # DynamoDB permissions
+    - Effect: Allow
+      Action:
+        - dynamodb:PutItem
+        - dynamodb:GetItem
+        - dynamodb:Query
+        - dynamodb:DeleteItem
+        - dynamodb:UpdateItem
+      Resource:
+        - arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.DYNAMODB_TABLE_NAME}
+        - arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.DYNAMODB_RATELIMIT_TABLE}
+    
+    # SQS permissions for delayed deletion
+    - Effect: Allow
+      Action:
+        - sqs:SendMessage
+      Resource: !GetAtt FileDeleteQueue.Arn
+    
+    # CloudWatch Logs
+    - Effect: Allow
+      Action:
+        - logs:CreateLogGroup
+        - logs:CreateLogStream
+        - logs:PutLogEvents
+      Resource: arn:aws:logs:${self:provider.region}:*:*
 
+# Lambda function definitions - each handler has its own Lambda
 functions:
-  api:
-    handler: handler.lambda_handler
-    events:
-      - http:
-          path: /{proxy+}
-          method: ANY
-          cors: true
+  # Upload handler - Issues presigned URLs and creates metadata
+  upload:
+    handler: src/handlers/upload.lambda_handler
     timeout: 30
     memorySize: 256
+    events:
+      - http:
+          path: /upload
+          method: POST
+          cors: true
+          authorizer:
+            name: rate_limit_authorizer
+            resultTtlInSeconds: 300
+    description: Upload file handler - generates presigned URLs and creates metadata
+  
+  # List files handler - Returns user's file history
+  listFiles:
+    handler: src/handlers/list_files.lambda_handler
+    timeout: 15
+    memorySize: 256
+    events:
+      - http:
+          path: /files
+          method: GET
+          cors: true
+          authorizer:
+            name: rate_limit_authorizer
+            resultTtlInSeconds: 300
+    description: List user files handler
+  
+  # Download handler - Issues presigned download URLs
+  download:
+    handler: src/handlers/download.lambda_handler
+    timeout: 15
+    memorySize: 256
+    events:
+      - http:
+          path: /files/{fileId}
+          method: GET
+          cors: true
+          authorizer:
+            name: rate_limit_authorizer
+            resultTtlInSeconds: 300
+    description: Download file handler - generates presigned download URLs
+  
+  # Delete file handler - User-initiated or scheduled deletion
+  deleteFile:
+    handler: src/handlers/delete_file.lambda_handler
+    timeout: 30
+    memorySize: 256
+    events:
+      # API endpoint for user-initiated deletion
+      - http:
+          path: /files/{fileId}
+          method: DELETE
+          cors: true
+          authorizer:
+            name: rate_limit_authorizer
+            resultTtlInSeconds: 300
+      # SQS event for scheduled deletion
+      - sqs:
+          arn: !GetAtt FileDeleteQueue.Arn
+          batchSize: 10
+          batchWindow: 60
+    description: Delete file handler - user-initiated or scheduled deletion
+  
+  # Rate limit authorizer - Applied to all API endpoints
+  rate_limit_authorizer:
+    handler: src/handlers/rate_limit.lambda_handler
+    timeout: 10
+    memorySize: 128
+    description: Rate limit authorizer - enforces per-user request limits
+  
+  # TODO: Add more specialized handlers as needed
+  # - healthCheck handler for ALB/CloudWatch
+  # - webhook handlers for file processing
+  # - notification handlers for completion events
 
-# TODO: Uncomment to use serverless-offline for local development
+# TODO: Uncomment to use plugins for local development and requirements management
 # plugins:
 #   - serverless-offline
 #   - serverless-python-requirements
+#   - serverless-plugin-tracing
 
-# TODO: Add DynamoDB resource
-# resources:
-#   Resources:
-#     MetadataTable:
-#       Type: AWS::DynamoDB::Table
-#       Properties:
-#         TableName: ${self:provider.environment.DYNAMODB_TABLE_NAME}
-#         BillingMode: PAY_PER_REQUEST
-#         AttributeDefinitions:
-#           - AttributeName: userId
-#             AttributeType: S
-#           - AttributeName: fileId
-#             AttributeType: S
-#         KeySchema:
-#           - AttributeName: userId
-#             KeyType: HASH
-#           - AttributeName: fileId
-#             KeyType: RANGE
-#         TimeToLiveSpecification:
-#           AttributeName: ttl
-#           Enabled: true
+# AWS Resources - S3, DynamoDB, SQS, etc.
+resources:
+  Resources:
+    # S3 Bucket for file storage
+    FileStorageBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:provider.environment.S3_BUCKET_NAME}
+        VersioningConfiguration:
+          Status: Enabled
+        PublicAccessBlockConfiguration:
+          BlockPublicAcls: true
+          BlockPublicPolicy: true
+          IgnorePublicAcls: true
+          RestrictPublicBuckets: true
+        LifecycleConfiguration:
+          Rules:
+            # Auto-delete old file versions after 7 days
+            - Id: DeleteOldVersions
+              Status: Enabled
+              NoncurrentVersionExpiration:
+                NoncurrentDays: 7
+      # TODO: Add encryption, logging, backup retention policies
+    
+    # DynamoDB Table for file metadata
+    MetadataTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.DYNAMODB_TABLE_NAME}
+        BillingMode: PAY_PER_REQUEST  # TODO: Consider provisioned capacity for production ??
+        AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: S
+          - AttributeName: fileId
+            AttributeType: S
+        KeySchema:
+          # Partition key: userId - all user's files together
+          - AttributeName: userId
+            KeyType: HASH
+          # Sort key: fileId - multiple files per user
+          - AttributeName: fileId
+            KeyType: RANGE
+        TimeToLiveSpecification:
+          AttributeName: ttl
+          Enabled: true
+        Tags:
+          - Key: Environment
+            Value: ${self:provider.stage}
+      # TODO: Add backup retention, point-in-time recovery
+    
+    # DynamoDB Table for rate limiting
+    RateLimitTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.DYNAMODB_RATELIMIT_TABLE}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: userId
+            KeyType: HASH
+        TimeToLiveSpecification:
+          AttributeName: ttl
+          Enabled: true
+        Tags:
+          - Key: Environment
+            Value: ${self:provider.stage}
+    
+    # SQS Queue for delayed file deletion
+    FileDeleteQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service}-delete-${self:provider.stage}
+        VisibilityTimeout: 120  # Allow 2 minutes to process deletion
+        MessageRetentionPeriod: 345600  # 4 days
+        DelaySeconds: 120  # 2-minute delay before processing (can be set per message)
+        Tags:
+          - Key: Environment
+            Value: ${self:provider.stage}
+      # TODO: Add dead-letter queue for failed messages
+    
+    # TODO: Add more resources as needed:
+    # - SNS topics for notifications
+    # - CloudWatch alarms for monitoring
+    # - VPC endpoints for private connectivity
+    # - KMS keys for encryption
 
-# TODO: Add S3 bucket resource
-# TODO: Add Lambda execution role with S3 and DynamoDB permissions
+  Outputs:
+    FileStorageBucketName:
+      Description: S3 bucket for file storage
+      Value: !Ref FileStorageBucket
+      Export:
+        Name: ${self:service}-bucket-${self:provider.stage}
+    
+    MetadataTableName:
+      Description: DynamoDB metadata table
+      Value: !Ref MetadataTable
+      Export:
+        Name: ${self:service}-metadata-table-${self:provider.stage}
+    
+    FileDeleteQueueUrl:
+      Description: SQS queue for file deletion
+      Value: !GetAtt FileDeleteQueue.QueueUrl
+      Export:
+        Name: ${self:service}-delete-queue-${self:provider.stage}
+
+# Packaging options
+package:
+  individually: false  # Package all functions together
+  # TODO: Set to true for faster deployments and consider using Lambda layers
+  patterns:
+    - src/**
+    - '!.git/**'
+    - '!.pytest_cache/**'
+    - '!node_modules/**'
+    - '!__pycache__/**'
+
+# TODO: Add deployment parameters for production hardening
+# - CloudFront CDN in front of S3
+# - WAF rules for API Gateway
+# - X-Ray tracing for debugging
+# - Custom domain and SSL certificates
+# - Multi-region deployment strategy

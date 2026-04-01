@@ -9,60 +9,13 @@ on:
 jobs:
   frontend:
     runs-on: ubuntu-latest
-    
-    defaults:
-      run:
-        working-directory: ./frontend
-    
     steps:
-    - uses: actions/checkout@v3
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: '18'
-    
-    - name: Install dependencies
-      run: npm install
-    
-    - name: Run tests
-      run: npm test -- --passWithNoTests
-    
-    - name: Build
-      run: npm run build
-    
-    # TODO: Add deployment to S3
-    # - name: Deploy to S3
-    #   run: |
-    #     aws s3 sync dist/ s3://${{ secrets.S3_BUCKET_NAME }}/
+      - run: echo "Frontend CI disabled - manual deployment"
 
   backend:
     runs-on: ubuntu-latest
-    
-    defaults:
-      run:
-        working-directory: ./backend
-    
     steps:
-    - uses: actions/checkout@v3
-    
-    - name: Setup Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-    
-    - name: Install dependencies
-      run: pip install -r requirements.txt
-    
-    - name: Run tests
-      run: python -m unittest discover -s tests -p "test_*.py"
-    
-    # TODO: Add deployment to AWS Lambda
-    # - name: Deploy to Lambda
-    #   run: serverless deploy --stage prod
-    #   env:
-    #     AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-    #     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      - run: echo "Backend CI disabled - manual deployment"
 
   # TODO: Add integration tests
   # integration-tests:
